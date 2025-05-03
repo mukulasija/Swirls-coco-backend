@@ -78,8 +78,14 @@ server.use(cookieParser());
 server.use(
   session({
     secret: process.env.SESSION_KEY,
-    resave: false, // don't save session if unmodified
-    saveUninitialized: false, // don't create session until something stored
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: 'lax'
+    }
   })
 );
 server.use(passport.authenticate('session'));
@@ -195,6 +201,15 @@ passport.deserializeUser(function (user, cb) {
 //     clientSecret: paymentIntent.client_secret,
 //   });
 // });
+
+// Error handling middleware
+server.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    message: 'Something went wrong',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
 
 main().catch((err) => console.log(err));
 

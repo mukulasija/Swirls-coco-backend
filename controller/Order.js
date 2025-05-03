@@ -15,25 +15,62 @@ exports.fetchOrdersByUser = async (req, res) => {
   };
   
   exports.createOrder = async (req, res) => {
-    const order = new Order(req.body);
-    // here we have to update stocks;
-    
-    for(let item of order.items){
-       let product =  await Product.findOne({_id:item.product.id})
-       product.$inc('stock',-1*item.quantity);
-       // for optimum performance we should make inventory outside of product.
-       await product.save()
-    }
-
     try {
+      // First validate the order data
+      if (!req.body.items || !req.body.user || !req.body.selectedAddress) {
+        return res.status(400).json({ message: 'Missing required order information' });
+      }
+
+      // Create the order
+      const order = new Order(req.body);
+      
+      // Update stock for each item
+      for(let item of order.items) {
+        if (!item.product || !item.product.id) {
+          return res.status(400).json({ message: 'Invalid product information' });
+        }
+        
+        const product = await Product.findOne({_id: item.product.id});
+        if (!product) {
+          return res.status(404).json({ message: 'Product not found' });
+        }
+        
+        if (product.stock < item.quantity) {
+          return res.status(400).json({ message: 'Insufficient stock' });
+        }
+        
+        product.$inc('stock', -1 * item.quantity);
+        await product.save();
+      }
+
+      // Save the order
       const doc = await order.save();
-      const user = await User.findById(order.user)
-       // we can use await for this also 
-       sendMail({to:user.email,html:invoiceTemplate(order),subject:'Order Received' })
-             
+      
+      // Get user information
+      const user = await User.findById(order.user);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      // Send confirmation email
+      try {
+        await sendMail({
+          to: user.email,
+          html: invoiceTemplate(order),
+          subject: 'Order Received'
+        });
+      } catch (emailError) {
+        console.error('Failed to send email:', emailError);
+        // Don't fail the order if email fails
+      }
+
       res.status(201).json(doc);
     } catch (err) {
-      res.status(400).json(err);
+      console.error('Order creation error:', err);
+      res.status(400).json({ 
+        message: 'Failed to create order',
+        error: err.message 
+      });
     }
   };
   
